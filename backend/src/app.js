@@ -3,18 +3,89 @@ const pool = require('./db')
 const bcrypt = require('bcrypt')
 const jwt = require('jsonwebtoken')
 const cors = require('cors')
+const multer = require('multer')
+const path = require('path')
+const fs = require('fs')
+const http = require('http');
+const { Server } = require('socket.io');
+
 const app = express()
+const server = http.createServer(app);
 const port = 4242
+
 const ACCESS_SECRET = "access_secret"
 const REFRESH_SECRET = "refresh_secret"
 const ACCESS_EXPIRES_IN = "5m"
 const REFRESH_EXPIRES_IN = "10m"
-
-//let users = [ ]
 const refreshTokens = new Set()
+
+//multer
+const storage = multer.diskStorage({
+    destination: function (req, file, cd) {
+        cd(null, 'public/uploads')
+    },
+    filename: function (req, file, cd) {
+        const uniqeuSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9)
+        const ext = path.extname(file.originalname)
+        cd(null, file.fieldname + '-' + uniqeuSuffix + ext)
+    }
+})
+const fileFilter = (req, file, cd) => {
+    const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png']
+    if (allowedTypes.includes(file.mimetype)) {
+        cd(null, true)
+    }
+    else {
+        cd(new Error('Недопустимый тип файла. Попробуйте форматы JPEG, JPG и PNG'), false)
+    }
+}
+const upload = multer({
+    storage: storage,
+    fileFilter: fileFilter,
+    limits: { fileSize: 5 * 1024 * 1024 }
+})
+app.use('/uploads', express.static('public/uploads'))
 
 //cors
 app.use(cors())
+const io = new Server(server, {
+  cors: {
+    origin: "http://localhost:5173", // URL вашего Vue приложения
+    methods: ["GET", "POST"]
+  }
+});
+
+//socket.io
+io.on('connection', (socket) => {
+  console.log(`Пользователь подключился: ${socket.id}`)
+  socket.on('join_room', (chatId) => {
+    const roomName = `chat_${chatId}`
+    socket.join(roomName);
+    console.log(`Сокет ${socket.id} вошел в комнату ${roomName}`)
+  })
+  socket.on('send_message', async (data) => {
+    const { chatId, senderId, text } = data
+    const roomName = `chat_${chatId}`
+    try {
+      io.to(roomName).emit('receive_message', {
+        id: Date.now(),
+        chatId,
+        senderId,
+        text,
+        createdAt: new Date()
+      })
+    } catch (error) {
+      console.error('Ошибка сохранения сообщения:', error)
+      socket.emit('error', 'Не удалось отправить сообщение')
+    }
+  })
+  socket.on('leave_room', (chatId) => {
+    socket.leave(`chat_${chatId}`)
+  })
+  socket.on('disconnect', () => {
+    console.log(`Пользователь отключился: ${socket.id}`)
+  })
+})
 
 //middleware
 app.use(express.json())
@@ -217,10 +288,21 @@ app.route('/me')
         const id = req.user.sub
         const user = await findUserById(id)
         if (user) {
-            await pool.query(
-                'DELETE FROM users WHERE id = $1 RETURNING *',
-                [id]
-            )
+            const result = (await pool.query('SELECT * FROM uploads WHERE user_id = $1', [id])).rows
+            if (result.length > 0) {
+                for (const image of result) {
+                    const filePath = path.join(__dirname, '../public/uploads', image.img_url)
+                    try {
+                        if (fs.existsSync(filePath)) {
+                            fs.unlinkSync(filePath)
+                        }
+                    } catch (fileErr) {
+                        console.error('Ошибка при удалении файла с диска:', fileErr)
+                    }
+                }
+                await pool.query('DELETE FROM uploads WHERE user_id = $1', [id])
+            }
+            await pool.query('DELETE FROM users WHERE id = $1 RETURNING *', [id])
             res.json({message: 'Пользователь успешно удален'})
         }
         else {
@@ -276,6 +358,79 @@ app.route('/users')
             res.status(404).json({ message: 'Пользователь не найден' })
         }
     })
+
+app.get('/api/images', async (req, res) => {
+    try {
+        const result = await pool.query('SELECT * FROM uploads')
+        res.json(result.rows)
+    } catch (error) {
+        res.status(500).json({ message: 'Ошибка сервера', error: error.message })
+    }
+})
+
+app.post('/api/upload', authMiddleware, upload.single('image'), async (req, res) => {
+    try {
+        if (!req.file) {
+            return res.status(400).json({ message: 'Выберите файл для загрузки' })
+        }
+        const id = req.user.sub
+        const title = req.body.title
+        const result = await pool.query('INSERT INTO uploads (user_id, img_url) VALUES ($1, $2)', [id, `${req.file.filename}`])
+        res.status(200).json({
+            message: 'Файл успешно загружен',
+            title: title,
+            fileInfo: {
+                originalName: req.file.originalname,
+                savedName: req.file.filename,
+                size: req.file.size,
+                path: req.file.path,
+                url: `http://localhost:${port}/uploads/${req.file.filename}`
+            }
+        })
+    } catch (error) {
+        res.status(500).json({ message: 'Ошибка сервера', error: error.message })
+    }
+})
+
+app.delete('/api/images/:id', authMiddleware, async (req, res) => {
+    try {
+        const imageId = req.params.id
+        const userId = req.user.sub
+        const result = await pool.query('SELECT * FROM uploads WHERE img_id = $1', [imageId])
+        const image = result.rows[0]
+        if (!image) {
+            return res.status(404).json({ message: 'Изображение не найдено' })
+        }
+        if (image.user_id !== userId) {
+            return res.status(403).json({ message: 'Нет прав для удаления этого изображения' })
+        }
+        const filePath = path.join(__dirname, '../public/uploads', image.img_url)
+        try {
+            if (fs.existsSync(filePath)) {
+                fs.unlinkSync(filePath)
+            }
+        } catch (fileErr) {
+            console.error('Ошибка при удалении файла с диска:', fileErr)
+        }
+        await pool.query('DELETE FROM uploads WHERE img_id = $1', [imageId])
+        res.json({ message: 'Изображение успешно удалено' })
+    } catch (error) {
+        res.status(500).json({ message: 'Ошибка сервера', error: error.message })
+    }
+})
+
+app.use((err, req, res, next) => {
+    if (err instanceof multer.MulterError) {
+        if (err.code === 'LIMIT_FILE_SIZE') {
+            return res.status(400).json({ message: 'Размер файла превышает 5 МБ' })
+        }
+        return res.status(400).json({ message: err.message })
+    }
+    else if (err) {
+        return res.status(400).json({ message: err.message })
+    }
+    next()
+})
 
 app.listen(port, () => {
     console.log(`http://localhost:${port}`)

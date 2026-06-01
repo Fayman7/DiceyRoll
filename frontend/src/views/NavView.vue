@@ -34,6 +34,7 @@ onMounted(() => {
     <nav>
         <h1>Навигация</h1>
         <RouterLink to="/user" class="label">Профиль</RouterLink>
+        <RouterLink to="/images" class="label">Изображения</RouterLink>
         <RouterLink v-if="isAdmin" to="/admin" class="label">Панель админа</RouterLink>
         <RouterLink @click="logout" to="/auth" class="label">{{ isAuthenticated ? 'Выйти' : 'Вход' }}</RouterLink>
     </nav>

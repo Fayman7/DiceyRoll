@@ -6,6 +6,10 @@ export async function apiFetch(endpoint, options = {}) {
         ...options.headers,
     };
 
+    if (options.body instanceof FormData) {
+        delete headers['Content-Type']
+    }
+
     if (accessToken) {
         headers['Authorization'] = `Bearer ${accessToken}`;
     }
@@ -39,7 +43,7 @@ async function refreshTokens() {
     if (!refreshToken) return false;
 
     try {
-        const res = await fetch(`/refresh`, {
+        const res = await fetch(`http://localhost:4242/refresh`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ refreshToken })
