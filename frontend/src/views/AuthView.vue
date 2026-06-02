@@ -83,24 +83,43 @@ const handleSubmit = async () => {
 </script>
 
 <template>
-    <button v-if="!RegisterMode" @click="RegisterMode = !RegisterMode">
-        Переключить на регистрацию</button>
-    <button v-if="RegisterMode" @click="RegisterMode = !RegisterMode">
-        Переключить на вход</button>
-    <form v-if="!RegisterMode" @submit.prevent="handleSubmit">
-        <input v-model="form.username" type="text" placeholder="Юзернейм">
-        <input v-model="form.password" type="password" placeholder="Пароль">
-        <button type="submit">Войти</button>
-    </form>
-    <form v-if="RegisterMode" @submit.prevent="handleSubmit">
-        <input v-model="form.username" type="text" placeholder="Юзернейм">
-        <input v-model="form.password" type="password" placeholder="Пароль">
-        <input v-model="form.confirmPassword" type="password" placeholder="Подтверждение пароля">
-        <button type="submit">Регистрация</button>
-    </form>
-    <p v-if="error">{{ error }}: {{ errorDiscribe }}</p>
+    <div class="page">
+        <h1>{{ RegisterMode ? 'Регистрация' : 'Вход' }}</h1>
+        <div class="card auth-card">
+            <button type="button" class="label" @click="RegisterMode = !RegisterMode">
+                {{ RegisterMode ? 'Переключить на вход' : 'Переключить на регистрацию' }}
+            </button>
+
+            <form class="auth-form" @submit.prevent="handleSubmit">
+                <input v-model="form.username" type="text" placeholder="Юзернейм" class="input">
+                <input v-model="form.password" type="password" placeholder="Пароль" class="input">
+                <input
+                    v-if="RegisterMode"
+                    v-model="form.confirmPassword"
+                    type="password"
+                    placeholder="Подтверждение пароля"
+                    class="input"
+                >
+                <button type="submit" class="label">
+                    {{ RegisterMode ? 'Регистрация' : 'Войти' }}
+                </button>
+            </form>
+        </div>
+        <p v-if="error" class="error">{{ error }}: {{ errorDiscribe }}</p>
+    </div>
 </template>
 
 <style scoped>
-
+.auth-card {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    width: 100%;
+    max-width: 380px;
+}
+.auth-form {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
 </style>
