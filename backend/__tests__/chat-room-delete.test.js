@@ -18,6 +18,22 @@ describe('Delete endpoints', () => {
     jest.restoreAllMocks()
   })
 
+  test('POST /api/game/rooms rejects duplicate room name', async () => {
+    pool.query.mockResolvedValueOnce({ rows: [{ id: 1 }] })
+
+    const response = await request(app)
+      .post('/api/game/rooms')
+      .set('Authorization', 'Bearer token')
+      .send({ name: 'Lobby', memberIds: [] })
+
+    expect(response.status).toBe(409)
+    expect(response.body.message).toBe('Комната с таким названием уже существует')
+    expect(pool.query).toHaveBeenCalledWith(
+      'SELECT id FROM game_rooms WHERE LOWER(name) = LOWER($1) LIMIT 1',
+      ['Lobby']
+    )
+  })
+
   test('DELETE /api/game/rooms/:id deletes own room', async () => {
     pool.query
       .mockResolvedValueOnce({ rows: [{ id: 3, created_by: 8 }] })
@@ -43,11 +59,11 @@ describe('Delete endpoints', () => {
 
   test('DELETE /api/chats/:partnerId deletes chat and messages', async () => {
     pool.query
-      .mockResolvedValueOnce({ rows: [{ id: 10, username: 'partner' }] }) // findUserById
-      .mockResolvedValueOnce({ rows: [{ id: 7 }] }) // findChatByUsers
-      .mockResolvedValueOnce({ rows: [{ user1_id: 8, user2_id: 10 }] }) // assertChatMember
-      .mockResolvedValueOnce({ rows: [] }) // delete messages
-      .mockResolvedValueOnce({ rows: [] }) // delete chat
+      .mockResolvedValueOnce({ rows: [{ id: 10, username: 'partner' }] })
+      .mockResolvedValueOnce({ rows: [{ id: 7 }] })
+      .mockResolvedValueOnce({ rows: [{ user1_id: 8, user2_id: 10 }] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
 
     const response = await request(app)
       .delete('/api/chats/10')

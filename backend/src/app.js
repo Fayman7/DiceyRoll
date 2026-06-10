@@ -244,7 +244,7 @@ async function assertGameRoomMember(roomId, userId) {
     }
 }
 
-async function assertListOwner(listId, userId) {
+async function assertListManager(listId, userId, isAdmin = false) {
     const result = await pool.query(
         'SELECT id, owner_id FROM item_lists WHERE id = $1',
         [listId]
@@ -255,8 +255,8 @@ async function assertListOwner(listId, userId) {
         err.status = 404
         throw err
     }
-    if (Number(list.owner_id) !== Number(userId)) {
-        const err = new Error('Редактировать список может только создатель')
+    if (Number(list.owner_id) !== Number(userId) && !isAdmin) {
+        const err = new Error('Недостаточно прав для управления списком')
         err.status = 403
         throw err
     }
@@ -341,7 +341,9 @@ io.on('connection', (socket) => {
                  RETURNING id, chat_id, user_id, text, is_read`,
                 [chatId, userId, trimmed]
             )
-            io.to(getRoomName(chatId)).emit('receive_message', result.rows[0])
+            const message = result.rows[0]
+            socket.emit('receive_message', message)
+            socket.to(getRoomName(chatId)).emit('receive_message', message)
         } catch (error) {
             console.error('send_message:', error)
             socket.emit('error', 'Не удалось отправить сообщение')
@@ -662,6 +664,20 @@ app.delete('/api/users/:id', authMiddleware, adminMiddleware, async (req, res) =
     }
 })
 
+app.get('/api/images/all', authMiddleware, adminMiddleware, async (req, res) => {
+    try {
+        const result = await pool.query(
+            `SELECT u.img_id, u.user_id AS owner_id, u.img_url, usr.username AS owner_username
+             FROM uploads u
+             JOIN users usr ON usr.id = u.user_id
+             ORDER BY u.img_id ASC`
+        )
+        res.json(result.rows)
+    } catch (error) {
+        res.status(500).json({ message: 'Ошибка сервера', error: error.message })
+    }
+})
+
 app.get('/api/images/shared', authMiddleware, async (req, res) => {
     try {
         const result = await pool.query(
@@ -716,6 +732,46 @@ app.get('/api/item-lists/mine', authMiddleware, async (req, res) => {
     }
 })
 
+app.get('/api/item-lists/all', authMiddleware, adminMiddleware, async (req, res) => {
+    try {
+        const result = await pool.query(
+            `SELECT il.id, il.name, il.owner_id, u.username AS owner_username,
+                    COALESCE(
+                      json_agg(
+                        json_build_object('id', ili.id, 'value', ili.value)
+                        ORDER BY ili.id
+                      ) FILTER (WHERE ili.id IS NOT NULL),
+                      '[]'::json
+                    ) AS items
+             FROM item_lists il
+             JOIN users u ON u.id = il.owner_id
+             LEFT JOIN item_list_items ili ON ili.list_id = il.id
+             GROUP BY il.id, u.username
+             ORDER BY il.id ASC`
+        )
+        res.json(result.rows)
+    } catch (error) {
+        res.status(500).json({ message: 'Ошибка сервера', error: error.message })
+    }
+})
+
+app.get('/api/item-lists/history', authMiddleware, async (req, res) => {
+    try {
+        const result = await pool.query(
+            `SELECT h.id, h.list_id, h.item_id, h.item_value, il.name AS list_name
+             FROM item_generation_history h
+             JOIN item_lists il ON il.id = h.list_id
+             WHERE h.user_id = $1
+             ORDER BY h.id DESC
+             LIMIT 50`,
+            [req.user.sub]
+        )
+        res.json(result.rows)
+    } catch (error) {
+        res.status(500).json({ message: 'Ошибка сервера', error: error.message })
+    }
+})
+
 app.get('/api/item-lists/:id/random', async (req, res) => {
     try {
         const listId = Number(req.params.id)
@@ -754,23 +810,6 @@ app.get('/api/item-lists/:id/random', async (req, res) => {
     }
 })
 
-app.get('/api/item-lists/history', authMiddleware, async (req, res) => {
-    try {
-        const result = await pool.query(
-            `SELECT h.id, h.list_id, h.item_id, h.item_value, il.name AS list_name
-             FROM item_generation_history h
-             JOIN item_lists il ON il.id = h.list_id
-             WHERE h.user_id = $1
-             ORDER BY h.id DESC
-             LIMIT 50`,
-            [req.user.sub]
-        )
-        res.json(result.rows)
-    } catch (error) {
-        res.status(500).json({ message: 'Ошибка сервера', error: error.message })
-    }
-})
-
 app.post('/api/item-lists', authMiddleware, async (req, res) => {
     try {
         const name = typeof req.body.name === 'string' ? req.body.name.trim() : ''
@@ -804,7 +843,7 @@ app.put('/api/item-lists/:id', authMiddleware, async (req, res) => {
         if (!listId) {
             return res.status(400).json({ message: 'Некорректный список' })
         }
-        await assertListOwner(listId, req.user.sub)
+        await assertListManager(listId, req.user.sub, req.user.isAdmin === true)
         const name = typeof req.body.name === 'string' ? req.body.name.trim() : ''
         const items = Array.isArray(req.body.items) ? req.body.items : []
         if (!name) {
@@ -834,7 +873,7 @@ app.delete('/api/item-lists/:id', authMiddleware, async (req, res) => {
         if (!listId) {
             return res.status(400).json({ message: 'Некорректный список' })
         }
-        await assertListOwner(listId, req.user.sub)
+        await assertListManager(listId, req.user.sub, req.user.isAdmin === true)
         await pool.query('DELETE FROM item_lists WHERE id = $1', [listId])
         res.json({ message: 'Список удален' })
     } catch (error) {
@@ -910,6 +949,13 @@ app.post('/api/game/rooms', authMiddleware, async (req, res) => {
         const trimmedName = typeof name === 'string' ? name.trim() : ''
         if (!trimmedName) {
             return res.status(400).json({ message: 'Укажите название комнаты' })
+        }
+        const duplicate = await pool.query(
+            'SELECT id FROM game_rooms WHERE LOWER(name) = LOWER($1) LIMIT 1',
+            [trimmedName]
+        )
+        if (duplicate.rows[0]) {
+            return res.status(409).json({ message: 'Комната с таким названием уже существует' })
         }
         const me = Number(req.user.sub)
         const ids = new Set([me, ...(Array.isArray(memberIds) ? memberIds.map(Number) : [])])

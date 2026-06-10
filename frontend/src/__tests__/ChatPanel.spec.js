@@ -2,10 +2,24 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import ChatPanel from '../components/ChatPanel.vue'
 
+const socketHandlers = {}
+
 const socketMock = {
-  on: vi.fn(),
-  off: vi.fn(),
-  emit: vi.fn(),
+  connected: true,
+  on: vi.fn((event, handler) => {
+    socketHandlers[event] = handler
+  }),
+  off: vi.fn((event) => {
+    delete socketHandlers[event]
+  }),
+  once: vi.fn((event, handler) => {
+    if (event === 'connect') handler()
+  }),
+  emit: vi.fn((event, payload) => {
+    if (event === 'join_chat' && socketHandlers.chat_joined) {
+      socketHandlers.chat_joined({ chatId: 3, partnerId: payload })
+    }
+  }),
 }
 
 vi.mock('../api', () => ({
@@ -21,6 +35,8 @@ import { fetchMessages, deleteChatByPartner } from '../api'
 
 describe('ChatPanel', () => {
   beforeEach(() => {
+    Object.keys(socketHandlers).forEach((key) => delete socketHandlers[key])
+    socketMock.emit.mockClear()
     localStorage.setItem('userId', '8')
     fetchMessages.mockResolvedValue({
       chatId: 3,

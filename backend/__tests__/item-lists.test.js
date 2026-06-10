@@ -61,7 +61,24 @@ describe('Item lists API', () => {
       .send({ name: 'n', items: ['a'] })
 
     expect(response.status).toBe(403)
-    expect(response.body.message).toContain('только создатель')
+    expect(response.body.message).toContain('Недостаточно прав')
+  })
+
+  test('PUT /api/item-lists/:id allows admin to edit foreign list', async () => {
+    jest.spyOn(jwt, 'verify').mockReturnValue({ sub: 1, isAdmin: true })
+    pool.query
+      .mockResolvedValueOnce({ rows: [{ id: 3, owner_id: 8 }] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+
+    const response = await request(app)
+      .put('/api/item-lists/3')
+      .set('Authorization', 'Bearer token')
+      .send({ name: 'edited', items: ['a'] })
+
+    expect(response.status).toBe(200)
+    expect(response.body.message).toBe('Список обновлен')
   })
 
   test('DELETE /api/item-lists/:id deletes for owner', async () => {
@@ -76,6 +93,34 @@ describe('Item lists API', () => {
 
     expect(response.status).toBe(200)
     expect(response.body.message).toBe('Список удален')
+  })
+
+  test('DELETE /api/item-lists/:id allows admin to delete foreign list', async () => {
+    jest.spyOn(jwt, 'verify').mockReturnValue({ sub: 1, isAdmin: true })
+    pool.query
+      .mockResolvedValueOnce({ rows: [{ id: 3, owner_id: 8 }] })
+      .mockResolvedValueOnce({ rows: [] })
+
+    const response = await request(app)
+      .delete('/api/item-lists/3')
+      .set('Authorization', 'Bearer token')
+
+    expect(response.status).toBe(200)
+    expect(response.body.message).toBe('Список удален')
+  })
+
+  test('GET /api/item-lists/all returns all lists for admin', async () => {
+    jest.spyOn(jwt, 'verify').mockReturnValue({ sub: 1, isAdmin: true })
+    pool.query.mockResolvedValueOnce({
+      rows: [{ id: 3, name: 'loot', owner_id: 8, owner_username: 'u8', items: [] }],
+    })
+
+    const response = await request(app)
+      .get('/api/item-lists/all')
+      .set('Authorization', 'Bearer token')
+
+    expect(response.status).toBe(200)
+    expect(response.body[0].owner_username).toBe('u8')
   })
 
   test('GET /api/item-lists/history returns user generation history', async () => {

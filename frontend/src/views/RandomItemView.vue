@@ -6,12 +6,16 @@ import {
     generateRandomItem,
     fetchItemGenerationHistory,
     fetchMyItemLists,
+    fetchAllItemLists,
     createItemList,
     updateItemList,
     deleteItemList,
+    parseJwtAdmin,
 } from '../api'
 
 const isAuthenticated = computed(() => !!localStorage.getItem('accessToken'))
+const isAdmin = ref(false)
+const currentUserId = Number(localStorage.getItem('userId'))
 
 const publicLists = ref([])
 const selectedListId = ref('')
@@ -20,6 +24,7 @@ const randomError = ref('')
 const generationHistory = ref([])
 
 const myLists = ref([])
+const userLists = ref([])
 const statusMessage = ref('')
 const editListId = ref(null)
 
@@ -51,6 +56,20 @@ async function loadMyLists() {
     } catch (err) {
         statusMessage.value = err.message
     }
+}
+
+async function loadUserLists() {
+    if (!isAdmin.value) return
+    try {
+        const lists = await fetchAllItemLists()
+        userLists.value = lists.filter((list) => Number(list.owner_id) !== currentUserId)
+    } catch (err) {
+        statusMessage.value = err.message
+    }
+}
+
+async function reloadLists() {
+    await Promise.all([loadMyLists(), loadPublicLists(), loadUserLists()])
 }
 
 async function loadGenerationHistory() {
@@ -90,7 +109,7 @@ async function onCreateList() {
         await createItemList({ name, items })
         createForm.value = { name: '', itemsText: '' }
         statusMessage.value = 'Список создан'
-        await Promise.all([loadMyLists(), loadPublicLists()])
+        await reloadLists()
     } catch (err) {
         statusMessage.value = err.message
     }
@@ -120,7 +139,7 @@ async function saveEdit(listId) {
         await updateItemList(listId, { name, items })
         statusMessage.value = 'Список обновлен'
         cancelEdit()
-        await Promise.all([loadMyLists(), loadPublicLists()])
+        await reloadLists()
     } catch (err) {
         statusMessage.value = err.message
     }
@@ -134,15 +153,17 @@ async function removeList(listId) {
             selectedListId.value = ''
             randomResult.value = ''
         }
-        await Promise.all([loadMyLists(), loadPublicLists()])
+        await reloadLists()
     } catch (err) {
         statusMessage.value = err.message
     }
 }
 
 onMounted(async () => {
+    isAdmin.value = parseJwtAdmin()
     await loadPublicLists()
     await loadMyLists()
+    await loadUserLists()
     await loadGenerationHistory()
 })
 </script>
@@ -214,6 +235,34 @@ onMounted(async () => {
                 </article>
             </div>
             <p v-else class="muted">У вас пока нет списков</p>
+        </section>
+
+        <section v-if="isAdmin" class="card section">
+            <h2>Списки пользователей</h2>
+            <div v-if="userLists.length" class="lists-wrap">
+                <article v-for="list in userLists" :key="`user-${list.id}`" class="card list-card">
+                    <template v-if="editListId === list.id">
+                        <input v-model="editForm.name" type="text" class="input" />
+                        <textarea v-model="editForm.itemsText" class="textarea" rows="5" />
+                        <div class="row">
+                            <button type="button" class="label small" @click="saveEdit(list.id)">Сохранить</button>
+                            <button type="button" class="label small" @click="cancelEdit">Отмена</button>
+                        </div>
+                    </template>
+                    <template v-else>
+                        <h3>{{ list.name }}</h3>
+                        <p class="muted">Владелец: {{ list.owner_username }}</p>
+                        <ul class="items-list">
+                            <li v-for="item in list.items" :key="item.id">{{ item.value }}</li>
+                        </ul>
+                        <div class="row">
+                            <button type="button" class="label small" @click="startEdit(list)">Редактировать</button>
+                            <button type="button" class="label small danger" @click="removeList(list.id)">Удалить</button>
+                        </div>
+                    </template>
+                </article>
+            </div>
+            <p v-else class="muted">Нет списков других пользователей</p>
         </section>
     </div>
 </template>

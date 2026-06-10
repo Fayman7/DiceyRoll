@@ -1,5 +1,5 @@
 <script setup>
-import { ref, watch, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, watch, onUnmounted, nextTick } from 'vue'
 import { fetchMessages, deleteChatByPartner } from '../api'
 import { connectSocket, getSocket } from '../socket'
 
@@ -11,6 +11,7 @@ const emit = defineEmits(['chat-deleted'])
 
 const messages = ref([])
 const activeChatId = ref(null)
+const chatReady = ref(false)
 const messageText = ref('')
 const errorMessage = ref('')
 const messagesContainer = ref(null)
@@ -37,21 +38,65 @@ function onReceiveMessage(msg) {
     }
 }
 
+function setupSocketListeners(socket) {
+    socket.off('receive_message', onReceiveMessage)
+    socket.on('receive_message', onReceiveMessage)
+}
+
+function waitForSocketConnect(socket) {
+    if (socket.connected) return Promise.resolve()
+    return new Promise((resolve) => {
+        socket.once('connect', resolve)
+    })
+}
+
+function joinChatRoom(socket) {
+    return new Promise((resolve, reject) => {
+        const onJoined = ({ chatId, partnerId }) => {
+            if (Number(partnerId) !== Number(props.partnerId)) return
+            activeChatId.value = chatId
+            chatReady.value = true
+            cleanup()
+            resolve()
+        }
+
+        const onSocketError = (msg) => {
+            const text = typeof msg === 'string' ? msg : 'Ошибка чата'
+            cleanup()
+            reject(new Error(text))
+        }
+
+        const cleanup = () => {
+            socket.off('chat_joined', onJoined)
+            socket.off('error', onSocketError)
+        }
+
+        socket.on('chat_joined', onJoined)
+        socket.on('error', onSocketError)
+        socket.emit('join_chat', props.partnerId)
+    })
+}
+
 async function openChat() {
     messages.value = []
     activeChatId.value = null
+    chatReady.value = false
     errorMessage.value = ''
     const socket = connectSocket()
     if (!socket) {
         errorMessage.value = 'Нет подключения'
         return
     }
+
+    setupSocketListeners(socket)
+
     try {
         const data = await fetchMessages(props.partnerId)
         activeChatId.value = data.chatId
         messages.value = data.messages || []
         scrollToBottom()
-        socket.emit('join_chat', props.partnerId)
+        await waitForSocketConnect(socket)
+        await joinChatRoom(socket)
     } catch (err) {
         errorMessage.value = err.message
     }
@@ -59,7 +104,7 @@ async function openChat() {
 
 function sendMessage() {
     const text = messageText.value.trim()
-    if (!text) return
+    if (!text || !chatReady.value) return
     const socket = getSocket()
     if (!socket) return
     socket.emit('send_message', { partnerId: props.partnerId, text })
@@ -74,6 +119,7 @@ async function removeChat() {
             socket.emit('leave_chat', activeChatId.value)
         }
         activeChatId.value = null
+        chatReady.value = false
         messages.value = []
         messageText.value = ''
         errorMessage.value = ''
@@ -90,13 +136,6 @@ watch(
     },
     { immediate: true }
 )
-
-onMounted(() => {
-    const socket = connectSocket()
-    if (socket) {
-        socket.on('receive_message', onReceiveMessage)
-    }
-})
 
 onUnmounted(() => {
     const socket = getSocket()
@@ -125,7 +164,7 @@ onUnmounted(() => {
         </div>
         <form class="composer" @submit.prevent="sendMessage">
             <input v-model="messageText" type="text" placeholder="Сообщение..." class="input" />
-            <button type="submit" class="label">Отправить</button>
+            <button type="submit" class="label" :disabled="!chatReady">Отправить</button>
         </form>
     </div>
 </template>

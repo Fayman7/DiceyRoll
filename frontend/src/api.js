@@ -105,6 +105,12 @@ export async function fetchMyItemLists() {
     return response.json()
 }
 
+export async function fetchAllItemLists() {
+    const response = await apiFetch(`${API_BASE}/api/item-lists/all`)
+    if (!response.ok) throw new Error('Не удалось загрузить списки пользователей')
+    return response.json()
+}
+
 export async function createItemList(payload) {
     const response = await apiFetch(`${API_BASE}/api/item-lists`, {
         method: 'POST',
@@ -155,6 +161,12 @@ export async function rollDice(diceType) {
 export async function fetchDiceHistory() {
     const response = await apiFetch(`${API_BASE}/api/dice/history`)
     if (!response.ok) throw new Error('Не удалось загрузить историю')
+    return response.json()
+}
+
+export async function fetchAllImages() {
+    const response = await apiFetch(`${API_BASE}/api/images/all`)
+    if (!response.ok) throw new Error('Не удалось загрузить все изображения')
     return response.json()
 }
 

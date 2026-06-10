@@ -22,6 +22,9 @@ CREATE TABLE IF NOT EXISTS game_rooms (
     created_by INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE
 );
 
+CREATE UNIQUE INDEX IF NOT EXISTS idx_game_rooms_name_lower
+    ON game_rooms (LOWER(name));
+
 CREATE TABLE IF NOT EXISTS game_room_members (
     room_id INTEGER NOT NULL REFERENCES game_rooms(id) ON DELETE CASCADE,
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,

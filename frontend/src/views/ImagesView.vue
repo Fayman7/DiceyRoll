@@ -1,7 +1,8 @@
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import AppMenu from '../components/AppMenu.vue'
 import {
+    fetchAllImages,
     fetchSharedImages,
     fetchMyImages,
     fetchImagesSharedBy,
@@ -13,11 +14,6 @@ import {
 } from '../api'
 
 const API_BASE = 'http://localhost:4242'
-const filters = [
-    { id: 'shared', label: 'Поделились со мной' },
-    { id: 'mine', label: 'Мои загрузки' },
-    { id: 'from', label: 'От пользователя' },
-]
 
 const activeFilter = ref('shared')
 const images = ref([])
@@ -29,6 +25,18 @@ const isUploading = ref(false)
 const shareTargetByImg = ref({})
 const isAdmin = ref(false)
 const fullscreenImage = ref('')
+
+const filters = computed(() => {
+    const base = [
+        { id: 'shared', label: 'Поделились со мной' },
+        { id: 'mine', label: 'Мои загрузки' },
+        { id: 'from', label: 'От пользователя' },
+    ]
+    if (isAdmin.value) {
+        return [{ id: 'all', label: 'Все изображения' }, ...base]
+    }
+    return base
+})
 
 const currentUserId = Number(localStorage.getItem('userId'))
 
@@ -43,7 +51,9 @@ async function loadContacts() {
 async function loadImages() {
     statusMessage.value = ''
     try {
-        if (activeFilter.value === 'shared') {
+        if (activeFilter.value === 'all') {
+            images.value = await fetchAllImages()
+        } else if (activeFilter.value === 'shared') {
             images.value = await fetchSharedImages()
         } else if (activeFilter.value === 'mine') {
             images.value = await fetchMyImages()
@@ -116,6 +126,7 @@ function canDelete(image) {
 
 function imageLabel(image) {
     if (activeFilter.value === 'mine') return 'Моё'
+    if (activeFilter.value === 'all') return `Владелец: ${image.owner_username}`
     return `От: ${image.from_username}`
 }
 
@@ -135,6 +146,9 @@ function onKeyDown(event) {
 
 onMounted(async () => {
     isAdmin.value = parseJwtAdmin()
+    if (isAdmin.value) {
+        activeFilter.value = 'all'
+    }
     window.addEventListener('keydown', onKeyDown)
     await loadContacts()
     await loadImages()

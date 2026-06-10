@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import ImagesView from '../views/ImagesView.vue'
 
 vi.mock('../api', () => ({
+  fetchAllImages: vi.fn(),
   fetchSharedImages: vi.fn(),
   fetchMyImages: vi.fn(),
   fetchImagesSharedBy: vi.fn(),
@@ -13,7 +14,7 @@ vi.mock('../api', () => ({
   parseJwtAdmin: vi.fn(() => false),
 }))
 
-import { fetchSharedImages, fetchContacts } from '../api'
+import { fetchAllImages, fetchSharedImages, fetchContacts, parseJwtAdmin } from '../api'
 
 describe('ImagesView', () => {
   beforeEach(() => {
@@ -31,6 +32,22 @@ describe('ImagesView', () => {
     await flushPromises()
     expect(fetchSharedImages).toHaveBeenCalled()
     expect(wrapper.text()).toContain('От: other')
+  })
+
+  it('loads all images for admin by default', async () => {
+    parseJwtAdmin.mockReturnValue(true)
+    fetchAllImages.mockResolvedValue([
+      { img_id: 2, img_url: 'admin.png', owner_id: 3, owner_username: 'owner' },
+    ])
+
+    const wrapper = mount(ImagesView, {
+      global: { stubs: { AppMenu: { template: '<div />' } } },
+    })
+    await flushPromises()
+
+    expect(fetchAllImages).toHaveBeenCalled()
+    expect(wrapper.text()).toContain('Все изображения')
+    expect(wrapper.text()).toContain('Владелец: owner')
   })
 
   it('closes fullscreen on Escape key', async () => {

@@ -7,9 +7,11 @@ vi.mock('../api', () => ({
   generateRandomItem: vi.fn(),
   fetchItemGenerationHistory: vi.fn(),
   fetchMyItemLists: vi.fn(),
+  fetchAllItemLists: vi.fn(),
   createItemList: vi.fn(),
   updateItemList: vi.fn(),
   deleteItemList: vi.fn(),
+  parseJwtAdmin: vi.fn(() => false),
 }))
 
 import {
@@ -17,7 +19,9 @@ import {
   generateRandomItem,
   fetchItemGenerationHistory,
   fetchMyItemLists,
+  fetchAllItemLists,
   createItemList,
+  parseJwtAdmin,
 } from '../api'
 
 describe('RandomItemView', () => {
@@ -56,6 +60,31 @@ describe('RandomItemView', () => {
     expect(fetchItemGenerationHistory).toHaveBeenCalled()
     expect(wrapper.text()).toContain('Мои списки')
     expect(wrapper.text()).toContain('История генерации')
+  })
+
+  it('admin sees user lists management section', async () => {
+    localStorage.setItem('accessToken', 'token')
+    localStorage.setItem('userId', '1')
+    parseJwtAdmin.mockReturnValue(true)
+    fetchAllItemLists.mockResolvedValue([
+      {
+        id: 2,
+        name: 'Foreign',
+        owner_id: 8,
+        owner_username: 'user8',
+        items: [{ id: 20, value: 'Gem' }],
+      },
+    ])
+
+    const wrapper = mount(RandomItemView, {
+      global: { stubs: { AppMenu: { template: '<div />' } } },
+    })
+    await flushPromises()
+
+    expect(fetchAllItemLists).toHaveBeenCalled()
+    expect(wrapper.text()).toContain('Списки пользователей')
+    expect(wrapper.text()).toContain('Владелец: user8')
+    expect(wrapper.text()).toContain('Редактировать')
   })
 
   it('generates random item from selected list', async () => {
